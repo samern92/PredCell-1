@@ -3,8 +3,15 @@
 import io
 import numpy as np
 
+def get_onehot_details(text):
+	chars=sorted(list(set(text)))
+	n_chars = len(chars)
+	char_to_ind_dict = {c: i for i, c in enumerate(chars)}
+	ind_to_char_dict = {i: c for i, c in enumerate(chars)}
+	return {"n_chars": n_chars, "char_to_ind_dict": char_to_ind_dict, "ind_to_char_dict": ind_to_char_dict}
+
 class Text_Loader():
-	def __init__(self, text, maxlen, step):
+	def __init__(self, text, maxlen, step, onehot_details = None):
 		self.segmented_data = None
 		self.onehot_data = None
 		self.data_length = None
@@ -12,10 +19,12 @@ class Text_Loader():
 		self.ind_to_char_dict = None
 		self.n_chars = None
 
-		chars = sorted(list(set(text)))
-		self.n_chars = len(chars)
-		self.char_to_ind_dict = {c: i for i, c in enumerate(chars)}
-		self.ind_to_char_dict = {i: c for i, c in enumerate(chars)}
+		if onehot_details is None:
+			onehot_details = get_onehot_details(text)
+		self.char_to_ind_dict = onehot_details["char_to_ind_dict"]
+		self.ind_to_char_dict = onehot_details["ind_to_char_dict"]
+		self.n_chars = onehot_details["n_chars"]
+
 		self.segmented_data, self.onehot_data = self.segment_data(text, maxlen, step)
 		self.data_length = len(self.segmented_data)
 

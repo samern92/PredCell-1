@@ -3,9 +3,9 @@
 import io
 import sys
 import numpy as np
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from torch.utils.data import DataLoader
-
+import matplotlib.pyplot as plt
 
 from Text_Loader import *
 from predcell_subtractive_relu import *
@@ -13,26 +13,38 @@ from predcell_subtractive_relu import *
 TEXT_FILE = "./nietzsche.txt"
 MAXLEN = len("the quick brown fox jumps over the lazy dog ")
 STEP = 5
-TRAIN_SIZE = 50000
-TEST_SIZE = 2000
+TRAIN_TEST_PORP = [5,2]
 DL_PARAMS = {"batch_size": 32, "shuffle": True}
 NUM_LSTEM = 1
+NUM_EPOCHS = 200
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.i_available() else "cpu")
+device = torch.device("cpu")
 print ("Using " + str(torch.cuda.device_count()) + " devices") 
 
 def main():
-	text = get_text(TEXT_FILE)
 
-	train_text = (text)[:TRAIN_SIZE]
-	FNT_train = Text_Loader(train_text, MAXLEN, STEP)
+# Load dataset
+################################################################################
+
+	text = get_text(TEXT_FILE)[:200]
+	onehot_details = get_onehot_details(text)
+	text_len = len(text)
+	tt_mark = int(text_len*TRAIN_TEST_PORP[0]/(TRAIN_TEST_PORP[0]+TRAIN_TEST_PORP[1]))
+	print ("Training size: " + str(tt_mark))
+	print ("Testing size: " + str(text_len - tt_mark))
+
+	train_text = (text)[:tt_mark]
+	FNT_train = Text_Loader(train_text, MAXLEN, STEP, onehot_details = onehot_details)
 	train_dl = DataLoader(FNT_train, **DL_PARAMS)
 
-	test_text = (text)[TRAIN_SIZE:TRAIN_SIZE+TEST_SIZE]
-	FNT_test = Text_Loader(test_text, MAXLEN, STEP)
+	test_text = (text)[tt_mark:]
+	FNT_test = Text_Loader(test_text, MAXLEN, STEP, onehot_details = onehot_details)
 	test_dl = DataLoader(FNT_test, **DL_PARAMS)
 
-	print (FNT_train.n_chars)
+# Define Model
+################################################################################
+
 	predcell = PredCells(NUM_LSTEM + 1, MAXLEN, 128, FNT_train.n_chars)
 	trainable_st_params = [p for model in predcell.st_units for p in model.parameters() if p.requires_grad]
 	trainable_err_params = [p for model in predcell.err_units for p in model.parameters() if p.requires_grad]
@@ -56,24 +68,61 @@ def main():
 		names_and_params.append((f'err_units[{lyr}].W.bias', err_unit.W.bias))
 	trainable_params = trainable_st_params + trainable_err_params
 
-	# predcell = torch.nn.DataParallel(predcell)
+# Training Model
+################################################################################
+
 	predcell = predcell.to(device)
 	optimizer = torch.optim.Adam(trainable_params, lr=8e-4)
 
-	train_losses = []
-	first_layer_train_losses = []
-	for batch_id, sentences in enumerate(tqdm(train_dl, total=len(train_dl), disable = True)):
-		print (sentences.shape)
-		print ("batch_id:" + str(batch_id))
-		curr_sent = sentences.to(torch.device(device))
-		print("Outside: input size", curr_sent.size())
-		predcell.init_vars()
-		loss, first_layer_loss, predictions = predcell.forward(curr_sent)
-		loss.backward()
-		optimizer.step()
-		optimizer.zero_grad()
-		train_losses.append(loss.detach().item())
-		first_layer_train_losses.append(first_layer_loss.detach().item())
+	all_train_loss = []
+	all_test_loss = []
+	# for epoch in trange(NUM_EPOCHS):
+	for epoch in range(NUM_EPOCHS):
+		print ("\nEpoch: " + str(epoch) + "\n################################################################################\n")
+		
+		# train
+		print ("Start Training")
+		train_losses = []
+		first_layer_train_losses = []
+		for batch_id, sentences in enumerate(tqdm(train_dl, total=len(train_dl), disable = True)):
+			# print ("batch_id:" + str(batch_id))
+			curr_sent = sentences.to(torch.device(device))
+			# print("Outside: input size", curr_sent.size())
+			predcell.init_vars(batch_size = sentences.shape[0])
+			loss, first_layer_loss, predictions = predcell.forward(curr_sent)
+			loss.backward()
+			optimizer.step()
+			optimizer.zero_grad()
+			train_losses.append(loss.detach())
+			first_layer_train_losses.append(torch.mean(first_layer_loss.detach()).numpy())
+		mean_train_losses = np.mean(train_losses)
+		mean_first_layer_train_losses = np.mean(first_layer_train_losses)
+		all_train_loss.append(mean_train_losses)
+
+		# validation
+		print ("Start Validating")
+		test_losses = []
+		first_layer_test_losses = []	
+		for batch_id, sentences in enumerate(tqdm(test_dl, total=len(test_dl), disable = True)):
+			curr_sent = sentences.to(torch.device(device))
+			predcell.init_vars(batch_size = sentences.shape[0])
+			loss, first_layer_loss, predictions = predcell.forward(curr_sent)
+			test_losses.append(loss.detach())
+			first_layer_test_losses.append(torch.mean(first_layer_loss.detach()).numpy())
+		mean_test_losses = np.mean(test_losses)
+		mean_first_layer_test_losses = np.mean(first_layer_test_losses)
+		all_test_loss.append(mean_test_losses)
+
+	print ("Training losses = " + str(all_train_loss))
+	print ("Testing losses = " + str(all_test_loss))
+	
+	fig = plt.figure()
+	ax = fig.gca()
+	ax.plot(all_train_loss, label = "Training Loss")
+	ax.plot(all_test_loss, label = "Validation Loss")
+	ax.legend()
+	fig.savefig("Losses.png", format = "png", dpi = 1000, transparent = True)
+	plt.clf()
 
 	return
 

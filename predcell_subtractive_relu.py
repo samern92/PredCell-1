@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 class StateUnit(nn.Module):
 	def __init__(self, layer_level, thislayer_dim, lowerlayer_dim, is_top_layer=False):
@@ -28,18 +29,33 @@ class StateUnit(nn.Module):
 		for p in self.parameters():
 			p.initially_requires_grad = p.requires_grad
 
-	def forward(self, BU_err, TD_err):
+	def forward(self, BU_err, TD_err, batch_size = None):
 		self.timestep += 1
 
+		# if self.is_top_layer:
+		# 	input = torch.unsqueeze(BU_err, 0) # make it so there is 1 batch
+		# else:
+		# 	input = torch.unsqueeze(torch.cat((BU_err, TD_err), 0), 0)
+		# h_0 = torch.unsqueeze(self.state, 0) # make 1 batch
+		# c_0 = torch.unsqueeze(self.cell_state, 0) # make 1 batch
+		# h_1, c_1 = self.LSTM_(input, (h_0, c_0))
+		# self.state = torch.squeeze(h_1) # remove batch
+		# self.cell_state = torch.squeeze(c_1) # remove batch
+
 		if self.is_top_layer:
-			input = torch.unsqueeze(BU_err, 0) # make it so there is 1 batch
+			input = BU_err
 		else:
-			input = torch.unsqueeze(torch.cat((BU_err, TD_err), 0), 0)
-		h_0 = torch.unsqueeze(self.state, 0) # make 1 batch
-		c_0 = torch.unsqueeze(self.cell_state, 0) # make 1 batch
+			input = torch.cat((BU_err, TD_err), -1)
+		h_0 = self.state # make 1 batch
+		c_0 = self.cell_state # make 1 batch
+		# print (self.layer_level)
+		# print (self.thislayer_dim)
+		# print (self.lowerlayer_dim)
+		# print (input.shape)
+		# print ("########################")
 		h_1, c_1 = self.LSTM_(input, (h_0, c_0))
-		self.state = torch.squeeze(h_1) # remove batch
-		self.cell_state = torch.squeeze(c_1) # remove batch
+		self.state = h_1 # remove batch
+		self.cell_state = c_1 # remove batch
 
 		self.recon = self.V(self.state)
 
@@ -47,15 +63,25 @@ class StateUnit(nn.Module):
 		#     self.recon = nn.functional.softmax(self.recon)
 
 	def set_state(self, input_char):
-		self.state = (input_char - torch.mean(input_char))/torch.std(input_char)
+		# self.state = (input_char - torch.mean(input_char,-1))/torch.std(input_char,-1)
+		# print (input_char.size())
+		# print (torch.mean(input_char,-1).size())
+		# print (torch.unsqueeze(torch.std(input_char,-1), 1).size())
+		self.state = torch.div(torch.sub(input_char,torch.unsqueeze(torch.mean(input_char,-1), 1)), torch.unsqueeze(torch.std(input_char,-1), 1))
 
-	def init_vars(self):
+	def init_vars(self, batch_size = None):
 		'''Sets state and reconstruction to zero, and set timestep to 0'''
 		self.timestep = 0
-		self.state = torch.zeros(self.thislayer_dim, dtype=torch.float32).to(torch.device(device))
-		self.cell_state = torch.zeros(self.thislayer_dim, dtype=torch.float32).to(torch.device(device))
-		# time points will be determined by the state
-		self.recon = torch.zeros(self.lowerlayer_dim, dtype=torch.float32).to(torch.device(device))
+		if batch_size is None:
+			self.state = torch.zeros(self.thislayer_dim, dtype=torch.float32).to(torch.device(device))
+			self.cell_state = torch.zeros(self.thislayer_dim, dtype=torch.float32).to(torch.device(device))
+			# time points will be determined by the state
+			self.recon = torch.zeros(self.lowerlayer_dim, dtype=torch.float32).to(torch.device(device))
+		else:
+			self.state = torch.zeros((batch_size, self.thislayer_dim), dtype= torch.float32)
+			self.cell_state = torch.zeros((batch_size, self.thislayer_dim), dtype=torch.float32).to(torch.device(device))
+			# time points will be determined by the state
+			self.recon = torch.zeros((batch_size, self.lowerlayer_dim), dtype=torch.float32).to(torch.device(device))
 	
 	def enable_training(self):
 		for p in self.parameters():
@@ -84,19 +110,27 @@ class ErrorUnit(nn.Module):
 		for p in self.parameters():
 			p.initially_requires_grad = p.requires_grad
 
-	def forward(self, state, recon):
+	def forward(self, state, recon, batch_size = None):
 		self.timestep += 1
 		#self.TD_err = torch.abs(state - recon)
-		self.TD_err = torch.cat((self.relu(state - recon),self.relu(recon - state)))
-		print (self.TD_err.shape)
+		self.TD_err = torch.cat((self.relu(state - recon),self.relu(recon - state)), dim = -1)
+		# print (self.layer_level)
+		# print (self.thislayer_dim)
+		# print (self.higherlayer_dim)
+		# print (self.TD_err.shape)
+		# print ("########################")
 		self.BU_err = self.W(self.TD_err.float())
 	
-	def init_vars(self):
+	def init_vars(self, batch_size = None):
 		'''Sets TD_err and BU_err to zero, and set timestep to 0'''
 		self.timestep = 0
-		self.TD_err = torch.zeros(self.thislayer_dim*2, dtype=torch.float32).to(torch.device(device))
-		# it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
-		self.BU_err = torch.zeros(self.higherlayer_dim, dtype=torch.float32).to(torch.device(device))
+		if batch_size is None:
+			self.TD_err = torch.zeros(self.thislayer_dim*2, dtype=torch.float32).to(torch.device(device))
+			# it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
+			self.BU_err = torch.zeros(self.higherlayer_dim, dtype=torch.float32).to(torch.device(device))
+		else:
+			self.TD_err = torch.zeros((batch_size, self.thislayer_dim*2), dtype=torch.float32).to(torch.device(device))
+			self.BU_err = torch.zeros((batch_size, self.higherlayer_dim), dtype=torch.float32).to(torch.device(device))
 	
 	def enable_training(self):
 		for p in self.parameters():
@@ -142,14 +176,16 @@ class PredCells(nn.Module):
 		first_layer_loss = 0
 		predictions = []
 
-		print ("\tIn Model: input size", input_sentence.size())
+		# print ("\tIn Model: input size", input_sentence.size())
 
 		# print(self.err_units[self.num_layers - 1].W.weight) # This should be constant.
 
-		for t in range(min(self.total_timesteps, len(input_sentence))):
+		# Change it so it iterate through the second dimension
+		for t in range(min(self.total_timesteps, input_sentence.size(-2))):
 			# input_char at each t is a one-hot character encoding
-			input_char = input_sentence[t]  # 56 dim one hot vector
-
+			if len(input_sentence == 3): input_char = input_sentence[:,t,:]
+			else: input_char = input_sentence[t]
+			# input_char = input_sentence[:,t,:]  # 56 dim one hot vector
 			for lyr in range(self.num_layers):
 				if lyr == 0:
 					# set the lowest state unit value to the current character
@@ -177,16 +213,16 @@ class PredCells(nn.Module):
 				# We can also do it in the simple manner specified on the powerpoint
 				# loss += torch.sum(torch.abs(self.err_units[lyr].TD_err))
 			
-			first_layer_loss += torch.sum(torch.abs(self.err_units[0].TD_err))
+			first_layer_loss += torch.sum(torch.abs(self.err_units[0].TD_err), -1)
 			predictions.append(self.st_units[1].recon)
 
 		return loss, first_layer_loss, predictions
 
-	def init_vars(self):
+	def init_vars(self, batch_size = None):
 		'''Sets all states and errors to zero vectors.'''
 		for st_unit, err_unit in zip(self.st_units, self.err_units):
-			st_unit.init_vars()
-			err_unit.init_vars()
+			st_unit.init_vars(batch_size = batch_size)
+			err_unit.init_vars(batch_size = batch_size)
 
 	def enable_layer_training(self, lyr):
 		self.st_units[lyr].enable_training()
