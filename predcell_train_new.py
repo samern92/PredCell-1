@@ -151,7 +151,7 @@ def main():
 		for ind in range(len(batch_id_records)):
 			outfile.write("Batch: " + str(batch_id_records[ind]) + "\n")
 			outfile.write("Pred:  " + "".join(onehot_to_char(monitor_pred[ind], FNT_train.ind_to_char_dict)))
-			outfile.wrtie("True: " + "".join(onehot_to_char(true_pred[ind], FNT_train.ind_to_char_dict)))
+			outfile.write("True: " + "".join(onehot_to_char(true_pred[ind], FNT_train.ind_to_char_dict)))
 	return
 
 def get_text(file_name):
