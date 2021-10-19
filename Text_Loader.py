@@ -13,7 +13,7 @@ def get_onehot_details(text):
 def onehot_to_char(onehot_encodings, ind_to_char_dict):
 	chars = np.argmax(onehot_encodings, axis = 1)
 	results = []
-	for c in chars: results.append(ind_to_char_dict[c])
+	for c in chars: results.append(ind_to_char_dict[int(c)])
 	return results
 
 
