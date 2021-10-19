@@ -16,7 +16,8 @@ STEP = 5
 TRAIN_TEST_PORP = [5,2]
 DL_PARAMS = {"batch_size": 32, "shuffle": True}
 NUM_LSTEM = 1
-NUM_EPOCHS = 200
+NUM_EPOCHS = 1
+MONITOR_INTERVAL = 1
 
 # device = torch.device("cuda" if torch.cuda.i_available() else "cpu")
 device = torch.device("cpu")
@@ -27,7 +28,7 @@ def main():
 # Load dataset
 ################################################################################
 
-	text = get_text(TEXT_FILE)[:200]
+	text = get_text(TEXT_FILE)[:1000]
 	onehot_details = get_onehot_details(text)
 	text_len = len(text)
 	tt_mark = int(text_len*TRAIN_TEST_PORP[0]/(TRAIN_TEST_PORP[0]+TRAIN_TEST_PORP[1]))
@@ -74,6 +75,14 @@ def main():
 	predcell = predcell.to(device)
 	optimizer = torch.optim.Adam(trainable_params, lr=8e-4)
 
+	counter = 0
+	monitor_train_loss = []
+	monitor_test_loss = []
+	monitor_pred = []
+	true_pred = []
+	batch_id_records = []
+
+
 	all_train_loss = []
 	all_test_loss = []
 	# for epoch in trange(NUM_EPOCHS):
@@ -95,6 +104,17 @@ def main():
 			optimizer.zero_grad()
 			train_losses.append(loss.detach())
 			first_layer_train_losses.append(torch.mean(first_layer_loss.detach()).numpy())
+			counter += 1
+			if counter % MONITOR_INTERVAL == 0:
+				batch_id_records.append(counter)
+				monitor_train_loss.append(train_losses[-1])
+				curr_predict = []
+				true_pred.append(sentences[0])
+				for time_points in predictions:
+					curr_predict.append(time_points[0].detach().numpy())
+				curr_predict = np.array(curr_predict)
+				monitor_pred.append(curr_predict)
+				true_pred.append(sentences[0])
 		mean_train_losses = np.mean(train_losses)
 		mean_first_layer_train_losses = np.mean(first_layer_train_losses)
 		all_train_loss.append(mean_train_losses)
@@ -109,6 +129,8 @@ def main():
 			loss, first_layer_loss, predictions = predcell.forward(curr_sent)
 			test_losses.append(loss.detach())
 			first_layer_test_losses.append(torch.mean(first_layer_loss.detach()).numpy())
+			if counter % MONITOR_INTERVAL == 0:
+				monitor_test_loss.append(train_losses[-1])
 		mean_test_losses = np.mean(test_losses)
 		mean_first_layer_test_losses = np.mean(first_layer_test_losses)
 		all_test_loss.append(mean_test_losses)
@@ -118,12 +140,18 @@ def main():
 	
 	fig = plt.figure()
 	ax = fig.gca()
-	ax.plot(all_train_loss, label = "Training Loss")
-	ax.plot(all_test_loss, label = "Validation Loss")
+	ax.plot(monitor_train_loss, label = "Training Loss")
+	ax.plot(monitor_test_loss, label = "Validation Loss")
+	ax.set_xlabel(batch_id_records)
 	ax.legend()
 	fig.savefig("Losses.png", format = "png", dpi = 1000, transparent = True)
 	plt.clf()
 
+	with open ("pred_results.txt", "w") as outfile:
+		for ind in range(len(batch_id_records)):
+			outfile.write("Batch: " + str(batch_id_records[ind]) + "\n")
+			outfile.write("Pred:  " + "".join(onehot_to_char(monitor_pred[ind], FNT_train.ind_to_char_dict)))
+			outfile.wrtie("True: " + "".join(onehot_to_char(true_pred[ind], FNT_train.ind_to_char_dict)))
 	return
 
 def get_text(file_name):

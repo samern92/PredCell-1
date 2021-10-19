@@ -10,6 +10,14 @@ def get_onehot_details(text):
 	ind_to_char_dict = {i: c for i, c in enumerate(chars)}
 	return {"n_chars": n_chars, "char_to_ind_dict": char_to_ind_dict, "ind_to_char_dict": ind_to_char_dict}
 
+def onehot_to_char(onehot_encodings, ind_to_char_dict):
+	chars = np.argmax(onehot_encodings, axis = 1)
+	results = []
+	for c in chars: results.append(ind_to_char_dict[c])
+	return results
+
+
+
 class Text_Loader():
 	def __init__(self, text, maxlen, step, onehot_details = None):
 		self.segmented_data = None
