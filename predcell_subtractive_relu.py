@@ -3,7 +3,8 @@ import torch.nn as nn
 import numpy as np
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda")
+# device = torch.device("cpu")
 
 class StateUnit(nn.Module):
 	def __init__(self, layer_level, thislayer_dim, lowerlayer_dim, is_top_layer=False):
@@ -19,17 +20,17 @@ class StateUnit(nn.Module):
 
 		# maps from this layer to the lower layer
 		# Note: includes a bias
-		self.V = nn.Linear(thislayer_dim, lowerlayer_dim)
+		self.V = nn.Linear(thislayer_dim, lowerlayer_dim).to(torch.device(device))
 		
 		self.LSTM_ = nn.LSTMCell(
 			input_size=thislayer_dim if is_top_layer else 3 * thislayer_dim,
-			hidden_size=thislayer_dim)
+			hidden_size=thislayer_dim).to(torch.device(device))
 		
 		# Add extra attribute to each parameter for use in enabling/disabling training
 		for p in self.parameters():
 			p.initially_requires_grad = p.requires_grad
 
-	def forward(self, BU_err, TD_err, batch_size = None):
+	def forward(self, BU_err, TD_err):
 		self.timestep += 1
 
 		# if self.is_top_layer:
@@ -48,11 +49,12 @@ class StateUnit(nn.Module):
 			input = torch.cat((BU_err, TD_err), -1)
 		h_0 = self.state # make 1 batch
 		c_0 = self.cell_state # make 1 batch
+
+		# print (next(self.LSTM_.parameters()).is_cuda)
 		# print (self.layer_level)
-		# print (self.thislayer_dim)
-		# print (self.lowerlayer_dim)
-		# print (input.shape)
-		# print ("########################")
+		# print (input.is_cuda)
+		# print (h_0.is_cuda)
+		# print (c_0.is_cuda)
 		h_1, c_1 = self.LSTM_(input, (h_0, c_0))
 		self.state = h_1 # remove batch
 		self.cell_state = c_1 # remove batch
@@ -67,7 +69,7 @@ class StateUnit(nn.Module):
 		# print (input_char.size())
 		# print (torch.mean(input_char,-1).size())
 		# print (torch.unsqueeze(torch.std(input_char,-1), 1).size())
-		self.state = torch.div(torch.sub(input_char,torch.unsqueeze(torch.mean(input_char,-1), 1)), torch.unsqueeze(torch.std(input_char,-1), 1))
+		self.state = torch.div(torch.sub(input_char,torch.unsqueeze(torch.mean(input_char,-1), 1)), torch.unsqueeze(torch.std(input_char,-1), 1)).to(torch.device(device))
 
 	def init_vars(self, batch_size = None):
 		'''Sets state and reconstruction to zero, and set timestep to 0'''
@@ -78,7 +80,7 @@ class StateUnit(nn.Module):
 			# time points will be determined by the state
 			self.recon = torch.zeros(self.lowerlayer_dim, dtype=torch.float32).to(torch.device(device))
 		else:
-			self.state = torch.zeros((batch_size, self.thislayer_dim), dtype= torch.float32)
+			self.state = torch.zeros((batch_size, self.thislayer_dim), dtype= torch.float32).to(torch.device(device))
 			self.cell_state = torch.zeros((batch_size, self.thislayer_dim), dtype=torch.float32).to(torch.device(device))
 			# time points will be determined by the state
 			self.recon = torch.zeros((batch_size, self.lowerlayer_dim), dtype=torch.float32).to(torch.device(device))
@@ -103,14 +105,14 @@ class ErrorUnit(nn.Module):
 
 		self.init_vars()
 
-		self.W = nn.Linear(thislayer_dim*2, higherlayer_dim)  # maps up to the next layer
-		self.relu = nn.ReLU()
+		self.W = nn.Linear(thislayer_dim*2, higherlayer_dim).to(torch.device(device))  # maps up to the next layer
+		self.relu = nn.ReLU().to(torch.device(device))
 
 		# Add extra attribute to each parameter for use in enabling/disabling training
 		for p in self.parameters():
 			p.initially_requires_grad = p.requires_grad
 
-	def forward(self, state, recon, batch_size = None):
+	def forward(self, state, recon):
 		self.timestep += 1
 		#self.TD_err = torch.abs(state - recon)
 		self.TD_err = torch.cat((self.relu(state - recon),self.relu(recon - state)), dim = -1)
@@ -174,8 +176,11 @@ class PredCells(nn.Module):
 	def forward(self, input_sentence, iternumber= 1e10):
 		loss = 0
 		first_layer_loss = 0
-		predictions = []
 
+		# predictions = []
+		predictions = np.empty(input_sentence.size(), dtype = float)
+		# predictions = torch.zeros(input_sentence.size(), dtype = torch.int8)
+		
 		# print ("\tIn Model: input size", input_sentence.size())
 
 		# print(self.err_units[self.num_layers - 1].W.weight) # This should be constant.
@@ -191,6 +196,8 @@ class PredCells(nn.Module):
 					# set the lowest state unit value to the current character
 					self.st_units[lyr].set_state(input_char)
 				else:
+					# print ("Forward Pass")
+					# print (self.st_units[lyr].state.is_cuda)
 					self.st_units[lyr].forward(self.err_units[lyr-1].BU_err, self.err_units[lyr].TD_err)
 				if lyr < self.num_layers - 1:
 					self.err_units[lyr].forward(self.st_units[lyr].state, self.st_units[lyr+1].recon)
@@ -212,9 +219,12 @@ class PredCells(nn.Module):
 
 				# We can also do it in the simple manner specified on the powerpoint
 				# loss += torch.sum(torch.abs(self.err_units[lyr].TD_err))
-			
+				
 			first_layer_loss += torch.sum(torch.abs(self.err_units[0].TD_err), -1)
-			predictions.append(self.st_units[1].recon)
+			# Copy the recon
+			# predictions.append(self.st_units[1].recon)
+			predictions[:,t,:] = self.st_units[1].recon.cpu().detach().numpy()
+			# predictions[:,t,:] = self.st_units[1].recon
 
 		return loss, first_layer_loss, predictions
 
