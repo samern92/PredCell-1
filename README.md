@@ -3,7 +3,7 @@ This is the code that we are using for the PredCell project.
 
 ## Files
 - `predcell.py`: defines the architecture
-- `predcell_train.py`: trains PredCell
+- `predcell_train_new.py`: trains PredCell
 
 ## How To Run
 1. Install any required python modules.
