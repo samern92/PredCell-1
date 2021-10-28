@@ -10,21 +10,24 @@ import matplotlib.pyplot as plt
 from Text_Loader import *
 from predcell_subtractive_relu import *
 
+np.random.seed(0)
+
 # Corpus Settings
-TEXT_FILE = "./nietzsche.txt"
+TEXT_FILE = "./nietzsche.txt" # consider changing corpus
 TRAIN_TEST_PROP = [5,2]
-DL_PARAMS = {"batch_size": 2048, "shuffle": True}
-MAXLEN = len("the quick brown fox jumps over the lazy dog ")
+DL_PARAMS = {"batch_size": 2048, "shuffle": True} #batch size is a hyperparameter
+MAXLEN = len("the quick brown fox jumps over the lazy dog ") # this is a hyperparameter
 STEP = 5
 # Model Settings
+CHECKPOINT = False
 NUM_LSTMS = 2
-NUM_EPOCHS = 5000
-CYCLE_LENGTH = 2
+NUM_EPOCHS = 1000
+CYCLE_LENGTH = 5 # this is a hyperparameter; also, we shouldn't necessarily train layers 1 and 2 for the same duration
 PERIODIC_TRAINING_ENABLED = True
 if PERIODIC_TRAINING_ENABLED and NUM_LSTMS != 2:
 	raise RuntimeError('Periodic training is meant for a 2 layer model.')
 # Monitoring Settings
-MONITOR_INTERVAL = [200,80]
+MONITOR_INTERVAL = [100,40]
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cuda")
@@ -53,7 +56,7 @@ def main():
 # Define Model
 ################################################################################
 
-	predcell = PredCells(NUM_LSTMS + 1, MAXLEN, 128, FNT_train.n_chars)
+	predcell = PredCells(NUM_LSTMS + 1, MAXLEN, 128, FNT_train.n_chars) # 128 is a hyperparameter
 	trainable_st_params = [p for model in predcell.st_units for p in model.parameters() if p.requires_grad]
 	trainable_err_params = [p for model in predcell.err_units for p in model.parameters() if p.requires_grad]
 	# Get all the parameters along with their associated names.
@@ -80,13 +83,25 @@ def main():
 ################################################################################
 
 	predcell = predcell.to(device)
-	optimizer = torch.optim.Adam(trainable_params, lr=8e-4)
-
+	optimizer = torch.optim.Adam(trainable_params, lr=8e-4) # this is a hyperparameter
+	start_epoch = 0
+	# load checkpoint
+	CHECKPOINT = True
+	checkpoint_path = './checkpoints/checkpoint_epoch_999.pt'
+	checkpoint = torch.load(checkpoint_path)
+	predcell.load_model(checkpoint_path)
+	optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+	start_epoch = checkpoint['epoch']
+	
 	train_counter = 0
 	test_counter = 0
+	# orig_monitor_train_loss_1 = monitor_train_loss_1 if CHECKPOINT else []
+	# orig_monitor_train_loss_2 = monitor_train_loss_2 if CHECKPOINT else []
+	# orig_monitor_test_loss_1 = monitor_test_loss_1 if CHECKPOINT else []
+	# orig_monitor_test_loss_2 = monitor_test_loss_2 if CHECKPOINT else []
 	monitor_train_loss_1 = []
-	monitor_train_loss_2 = []
 	monitor_test_loss_1 = []
+	monitor_train_loss_2 = []
 	monitor_test_loss_2 = []
 	monitor_pred = []
 	true_pred = []
@@ -95,8 +110,8 @@ def main():
 
 	all_train_loss = []
 	all_test_loss = []
-	# for epoch in trange(NUM_EPOCHS):
-	for epoch in range(NUM_EPOCHS):
+	for epoch in trange(NUM_EPOCHS):
+	# for epoch in range(NUM_EPOCHS):
 		# print ("\nEpoch: " + str(epoch) + "\n################################################################################\n")
 		if PERIODIC_TRAINING_ENABLED:
 			cycle = epoch % (2 * CYCLE_LENGTH)
@@ -153,13 +168,14 @@ def main():
 				# curr_predict = np.array(curr_predict)
 				# monitor_pred.append(curr_predict)
 
+
 				monitor_pred.append(predictions[0])
 				# print (predictions[0].shape)
 				# print (np.argmax(predictions[0], axis = 1))
 				true_pred.append(sentences[0])
-		mean_train_losses = np.mean(train_losses)
-		mean_first_layer_train_losses = np.mean(first_layer_train_losses)
-		all_train_loss.append(mean_train_losses)
+		# mean_train_losses = np.mean(train_losses.numpy())
+		# mean_first_layer_train_losses = np.mean(first_layer_train_losses)
+		# all_train_loss.append(mean_train_losses)
 
 		# validation
 		# print ("Start Validating")
@@ -178,12 +194,12 @@ def main():
 				elif cycle == CYCLE_LENGTH:
 					monitor_test_loss_2.append(test_losses[-1])
 
-		mean_test_losses = np.mean(test_losses)
-		mean_first_layer_test_losses = np.mean(first_layer_test_losses)
-		all_test_loss.append(mean_test_losses)
+		# mean_test_losses = np.mean(test_losses)
+		# mean_first_layer_test_losses = np.mean(first_layer_test_losses)
+		# all_test_loss.append(mean_test_losses)
 
-	print ("Training losses = " + str(all_train_loss))
-	print ("Testing losses = " + str(all_test_loss))
+	# print ("Training losses = " + str(all_train_loss))
+	# print ("Testing losses = " + str(all_test_loss))
 	
 	enforce_length = min([len(monitor_train_loss_1), len(monitor_train_loss_2),len(monitor_test_loss_1), len(monitor_test_loss_2)])
 	monitor_train_loss_1 = monitor_train_loss_1[:enforce_length]
@@ -191,7 +207,17 @@ def main():
 	monitor_test_loss_1 = monitor_test_loss_1[:enforce_length]
 	monitor_test_loss_2 = monitor_test_loss_2[:enforce_length]
 	batch_id_records = batch_id_records[:enforce_length]
-
+	checkpoint_path = f'./checkpoints/checkpoint_epoch_{start_epoch + epoch}.pt'
+	checkpoint = {
+		'epoch': start_epoch + epoch,
+		'optimizer_state_dict': optimizer.state_dict(),
+		'monitor_train_loss_1': monitor_train_loss_1,
+		'monitor_train_loss_2': monitor_train_loss_2,
+		'monitor_test_loss_1': monitor_test_loss_1,
+		'monitor_test_loss_2': monitor_test_loss_2,
+		'batch_id_records': batch_id_records
+	}
+	predcell.save_model(checkpoint, checkpoint_path)
 	fig = plt.figure()
 	ax = fig.gca()
 	ax.plot(monitor_train_loss_1, label = "Training Loss 1")
@@ -201,10 +227,10 @@ def main():
 	# ax.set_xticks(np.arange(enforce_length))
 	# ax.set_xticklabels(batch_id_records)
 	ax.legend()
-	fig.savefig("Losses.png", format = "png", dpi = 1000, transparent = True)
+	fig.savefig(f"Losses_epoch_{start_epoch + epoch}.png", format = "png", dpi = 1000, transparent = True)
 	plt.clf()
 
-	with open ("pred_results.txt", "w") as outfile:
+	with open (f"pred_results_{start_epoch + epoch}.txt", "w") as outfile:
 		for ind in range(len(batch_id_records)):
 			outfile.write("Batch: " + str(batch_id_records[ind]) + "\n")
 			outfile.write("Pred:  " + "".join(onehot_to_char(monitor_pred[ind], FNT_train.ind_to_char_dict)) + "\n")
