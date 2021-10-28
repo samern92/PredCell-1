@@ -205,14 +205,14 @@ class PredCells(nn.Module):
 					pass
 				
 				# Update Loss
-				#lambda1 = (np.cos(x)+ x)/(x + 1) if lyr == 0 else (.5*np.sin(x) + x/7)/(.5 + x/7)
-				lambda1 = 1.0 if lyr ==0 else 0.75#(iternumber%10)/10
+				#lamda = (np.cos(x)+ x)/(x + 1) if lyr == 0 else (.5*np.sin(x) + x/7)/(.5 + x/7)
+				lamda = 1.0 if lyr ==0 else 0.75#(iternumber%10)/10 this is a hyperparameter
 				
 				if lyr != self.num_layers - 1:
 					# If lyr == self.num_layers - 1, i.e. this is the top layer,
 					# then the TD error at this layer will be 0 so it does not make a difference if we include this condition.
 					if self.layer_losses_enabled[lyr]:
-						loss += torch.sum(torch.abs(self.err_units[lyr].TD_err))*lambda1
+						loss += torch.sum(torch.abs(self.err_units[lyr].TD_err))*lamda
 
 				# if lyr == 0:
 				#     loss += torch.sum(torch.abs(self.err_units[lyr].TD_err))
@@ -241,7 +241,21 @@ class PredCells(nn.Module):
 	def disable_layer_training(self, lyr):
 		self.st_units[lyr].disable_training()
 		self.err_units[lyr-1].disable_training()
+	
+	def save_model(self, checkpoint,checkpoint_path):
+		assert len(self.st_units) == len(self.err_units)
+		for lyr in range(len(self.st_units)):
+			checkpoint[f'st_units[{lyr}]'] = self.st_units[lyr].state_dict()
+			checkpoint[f'err_units[{lyr}]'] = self.err_units[lyr].state_dict()
+		torch.save(checkpoint, checkpoint_path)
 
+	def load_model(self, checkpoint_path):
+		checkpoint = torch.load(checkpoint_path)
+		assert len(self.st_units) == len(self.err_units)
+		for lyr in range(len(self.st_units)):
+			self.st_units[lyr].load_state_dict(checkpoint[f'st_units[{lyr}]'])
+			self.err_units[lyr].load_state_dict(checkpoint[f'err_units[{lyr}]'])
+		pass
 
 if __name__ == "__main__":
 	state_unit = StateUnit(1, 5, 5)
