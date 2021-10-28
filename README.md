@@ -2,7 +2,7 @@
 This is the code that we are using for the PredCell project.
 
 ## Files
-- `predcell.py`: defines the architecture
+- `predcell_subtractive_relu.py`: defines the architecture
 - `predcell_train_new.py`: trains PredCell
 
 ## How To Run
